@@ -67,8 +67,10 @@ drive (`cdrdao` on macOS, ImgBurn on Windows) to get `.bin`+`.cue` pairs.
 Two independent systems, both real:
 
 - **Memory cards.** The in-game save menu writes to a virtual memory card in
-  `~/Library/Application Support/PS1Sim/saves/`, flushed when you exit to the
-  library. This is the save the game itself knows about.
+  `~/Library/Application Support/PS1Sim/saves/`, named after the game's serial
+  (`SLUS-00662_1.mcd`). Two cards are provided, as on real hardware, and the
+  format is the one DuckStation and ePSXe read, so cards move between emulators.
+  This is the save the game itself knows about.
 - **Save states.** Eight slots per game, snapshotting the entire machine —
   ⌘S saves slot 1, ⌘L loads it, and the **States** menu covers all eight.
 
@@ -144,6 +146,15 @@ Check the core's licence before redistributing it.
 | `UI/MetalVideoView.swift` | Runtime-compiled Metal shader drawing the framebuffer |
 | `UI/LibraryView.swift` | Cover grid, import, search |
 | `UI/EmulatorView.swift` | In-game chrome and key handling |
+| `Tools/core-probe.c` | Headless probe printing the core's controller ids and option values |
+
+Core options and controller ids are not guessed. `Tools/core-probe.c` dlopens the
+core and prints exactly what it advertises:
+
+```bash
+clang -o /tmp/probe Tools/core-probe.c
+/tmp/probe ~/Library/Application\ Support/PS1Sim/cores/pcsx_rearmed_libretro.dylib
+```
 
 Frame pacing runs on the wall clock, nudged by how full the audio ring buffer is,
 so video stays locked to the sound card rather than drifting against it.

@@ -73,29 +73,38 @@ final class LibretroCore: @unchecked Sendable {
     private(set) var fps: Double = 60.0
     private(set) var sampleRate: Double = 44100.0
 
+    /// RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1) as reported by this core.
+    static let dualShockDevice: UInt32 = 517
+
     /// 0 = RGB1555, 1 = XRGB8888, 2 = RGB565.
     private var pixelFormat: UInt32 = 0
     private var geometryAspect: Float = 4.0 / 3.0
 
     /// Core options we answer GET_VARIABLE with. Tuned for accuracy on a Mac.
+    /// Core options we answer GET_VARIABLE with. Every key and value here is
+    /// verified against the core with Tools/core-probe.c — an unknown key makes
+    /// GET_VARIABLE return false, and an invalid value is silently ignored, so
+    /// both fail quietly rather than erroring.
     private var variables: [String: String] = [
+        // Memory cards. Written by the core itself as <SERIAL>_1.mcd in the save
+        // directory, which is the layout DuckStation and ePSXe also read.
+        "pcsx_rearmed_memcard1": "serial",
+        "pcsx_rearmed_memcard2": "serial",
+
         "pcsx_rearmed_frameskip": "0",
         "pcsx_rearmed_region": "auto",
-        "pcsx_rearmed_pad1type": "analog",
-        "pcsx_rearmed_pad2type": "analog",
         "pcsx_rearmed_analog_axis_modifier": "circle",
         "pcsx_rearmed_vibration": "enabled",
         "pcsx_rearmed_dithering": "enabled",
         "pcsx_rearmed_display_internal_fps": "disabled",
         "pcsx_rearmed_show_bios_bootlogo": "disabled",
-        "pcsx_rearmed_memcard2": "disabled",
         "pcsx_rearmed_spu_reverb": "enabled",
         "pcsx_rearmed_spu_interpolation": "gaussian",
-        "pcsx_rearmed_idiablofix": "disabled",
         "pcsx_rearmed_neon_enhancement_enable": "disabled",
         "pcsx_rearmed_gpu_slow_llists": "disabled",
     ]
 
+    /// Called on the emulation thread with each converted frame.
     /// Called on the emulation thread with each converted frame.
     var onVideoFrame: ((VideoFrame) -> Void)?
     /// Called on the emulation thread with interleaved stereo Int16 samples.
@@ -200,11 +209,13 @@ final class LibretroCore: @unchecked Sendable {
         sampleRate = av.timing.sample_rate > 0 ? av.timing.sample_rate : 44100.0
         if av.geometry.aspect_ratio > 0 { geometryAspect = av.geometry.aspect_ratio }
 
-        // Ask for DualShock on both ports so analog games see a full pad.
+        // Ask for a DualShock on both ports. 517 is the subclass id this core
+        // advertises for "dualshock"; plain RETRO_DEVICE_JOYPAD (1) is the digital
+        // pad and reports no analog sticks at all.
         if let devicePointer = dlsym(handle, "retro_set_controller_port_device") {
             let setDevice = unsafeBitCast(devicePointer, to: FnPortDevice.self)
-            setDevice(0, 1)  // RETRO_DEVICE_JOYPAD; core option upgrades it to analog
-            setDevice(1, 1)
+            setDevice(0, LibretroCore.dualShockDevice)
+            setDevice(1, LibretroCore.dualShockDevice)
         }
     }
 
@@ -271,7 +282,15 @@ final class LibretroCore: @unchecked Sendable {
             let variable = data.assumingMemoryBound(to: retro_variable.self)
             guard let keyPointer = variable.pointee.key else { return false }
             let key = String(cString: keyPointer)
-            guard let value = variables[key] else { return false }
+            guard let value = variables[key] else {
+                // A key we do not answer leaves the core on its own default, which
+                // is how the memory card silently went missing. Log it so the next
+                // gap is visible rather than mysterious.
+                if unansweredVariables.insert(key).inserted {
+                    onLog?("no value supplied for core option \(key)")
+                }
+                return false
+            }
             variable.pointee.value = cachedCString(for: value)
             return true
 
@@ -328,6 +347,7 @@ final class LibretroCore: @unchecked Sendable {
     private var savePathCache: [CChar] = []
     private var assetsPathCache: [CChar] = []
     private var variableCache: [String: [CChar]] = [:]
+    private var unansweredVariables = Set<String>()
 
     private func writePath(_ url: URL, to data: UnsafeMutableRawPointer?, cache: inout [CChar]) -> Bool {
         guard let data else { return false }
