@@ -9,7 +9,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 VERSION="${1:-1.0.0}"
-APP="dist/PS1Sim.app"
+# The bundle is assembled and signed outside the project directory. This tree is
+# inside ~/Documents, which a file provider syncs, and Finder sets
+# com.apple.FinderInfo on any bundle that gains a custom icon — asynchronously,
+# so it can land between the xattr clear and codesign. codesign refuses to sign
+# over it. Somewhere Finder is not watching, the race does not exist.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ps1sim-build.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+APP="$WORK/PS1Sim.app"
+FINAL_APP="dist/PS1Sim.app"
 DMG="dist/PS1Sim-${VERSION}.dmg"
 
 echo "==> Building universal binary (arm64 + x86_64)"
@@ -64,22 +72,33 @@ if [ -d packaging/cores ] && compgen -G "packaging/cores/*.dylib" > /dev/null; t
 fi
 
 echo "==> Signing (ad-hoc)"
-# Copied files can carry extended attributes, which codesign refuses to sign over.
+# Copied files carry extended attributes, which codesign refuses to sign over.
 xattr -cr "$APP"
 rm -f "$BINARY"
+# Signing must not fail quietly — an unsigned bundle looks fine here and then
+# refuses to launch on someone else's Mac.
 codesign --force --deep --sign - \
   --entitlements packaging/PS1Sim.entitlements \
-  --options runtime "$APP" 2>/dev/null || \
-codesign --force --deep --sign - --entitlements packaging/PS1Sim.entitlements "$APP"
+  --options runtime "$APP"
+codesign --verify --deep --strict "$APP"
 
 echo "==> Building $DMG"
-STAGING="dist/dmg"
+# Staged next to the signed bundle, for the same reason it was signed there: a
+# copy that passes through the synced project directory picks up FinderInfo and
+# no longer verifies. The DMG is what people download, so it is built from the
+# bundle that was just verified, not from a copy of it.
+STAGING="$WORK/dmg"
 mkdir -p "$STAGING"
-cp -R "$APP" "$STAGING/"
+ditto "$APP" "$STAGING/PS1Sim.app"
 ln -s /Applications "$STAGING/Applications"
 cp README.md "$STAGING/README.md" 2>/dev/null || true
 hdiutil create -volname "PS1Sim" -srcfolder "$STAGING" -ov -format ULFO "$DMG" >/dev/null
-rm -rf "$STAGING"
+
+# A convenience copy for running the build locally. This one may pick up
+# FinderInfo from the file provider; that is cosmetic and does not affect the DMG.
+rm -rf "$FINAL_APP"
+ditto "$APP" "$FINAL_APP"
+APP="$FINAL_APP"
 
 echo
 echo "Built:"
