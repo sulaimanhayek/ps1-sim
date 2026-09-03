@@ -16,6 +16,8 @@ enum Paths {
     static var states: URL { root.appendingPathComponent("states", isDirectory: true) }
     static var artwork: URL { root.appendingPathComponent("artwork", isDirectory: true) }
     static var generatedCues: URL { root.appendingPathComponent("cues", isDirectory: true) }
+    /// Timestamped copies of memory cards, made on request.
+    static var cardBackups: URL { root.appendingPathComponent("card-backups", isDirectory: true) }
     /// .m3u playlists we write when a multi-disc game is imported.
     static var playlists: URL { root.appendingPathComponent("playlists", isDirectory: true) }
 

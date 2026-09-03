@@ -32,6 +32,8 @@ final class EmulationRunner: @unchecked Sendable {
     /// Discs in the loaded playlist, read once after the game loads. A single-disc
     /// game reports 0 or 1 and the UI hides the tray entirely.
     private(set) var discCount = 0
+    /// True when start() picked up where the last session left off.
+    private(set) var resumed = false
 
     /// Delivered on the main queue.
     var onEvent: ((Event) -> Void)?
@@ -47,7 +49,15 @@ final class EmulationRunner: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    func start(discURL: URL) throws {
+    /// Where the state written on a clean exit lives. Kept out of the eight numbered
+    /// slots so it can never overwrite something the player saved deliberately.
+    static func autoStateURL(gameID: UUID) -> URL {
+        let directory = Paths.statesDirectory(for: gameID)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("auto.state")
+    }
+
+    func start(discURL: URL, resuming: Bool) throws {
         let core = try LibretroCore(corePath: Paths.corePath)
         self.core = core
 
@@ -77,6 +87,13 @@ final class EmulationRunner: @unchecked Sendable {
         }
 
         discCount = core.discCount
+
+        // Restored before the emulation thread starts, while the core is idle and
+        // nothing else can touch it.
+        if resuming, let data = try? Data(contentsOf: Self.autoStateURL(gameID: gameID)) {
+            resumed = core.restoreState(data)
+        }
+
         audio.start(sampleRate: core.sampleRate)
 
         let thread = Thread { [weak self] in self?.emulationLoop() }
@@ -89,13 +106,17 @@ final class EmulationRunner: @unchecked Sendable {
 
     /// Stops the loop, then tears the core down. retro_unload_game is what flushes
     /// memory cards, so this must run before the process exits.
-    func shutdown() {
+    func shutdown(writingAutoState: Bool) {
         controlLock.lock(); shouldStop = true; controlLock.unlock()
         while let thread, !thread.isFinished {
             usleep(2000)
         }
         thread = nil
         audio.stop()
+        // The thread has stopped, so the core is idle and safe to touch from here.
+        if writingAutoState, let core, let data = try? core.serializeState() {
+            try? data.write(to: Self.autoStateURL(gameID: gameID), options: .atomic)
+        }
         core?.shutdown()
         core = nil
     }
@@ -241,19 +262,30 @@ final class EmulatorSession: ObservableObject {
     /// One entry per disc in the playlist; empty for a single-disc game.
     @Published private(set) var discs: [String] = []
     @Published private(set) var currentDisc = 0
+    /// Name of a connected controller, if any.
+    @Published private(set) var gamepadName: String?
 
     let game: Game
     private let runner: EmulationRunner
+    private let resumeOnLaunch: Bool
     private var startedAt = Date()
     private var toastTask: Task<Void, Never>?
+    private let gamepad: GamepadBridge
 
     var frameStore: FrameStore { runner.frameStore }
     var input: InputState { runner.input }
 
     init(game: Game, settings: Settings) {
         self.game = game
+        self.resumeOnLaunch = settings.resumeOnLaunch
         self.runner = EmulationRunner(gameID: game.id)
+        self.gamepad = GamepadBridge(input: runner.input)
         settings.apply(to: runner.input)
+        gamepad.onConnectionChange = { [weak self] name in
+            guard let self else { return }
+            self.gamepadName = name
+            if let name { self.show("\(name) connected") }
+        }
         runner.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {
@@ -270,7 +302,9 @@ final class EmulatorSession: ObservableObject {
     func start() {
         guard case .starting = status else { return }
         do {
-            try runner.start(discURL: game.url)
+            try runner.start(discURL: game.url, resuming: resumeOnLaunch)
+            if runner.resumed { show("Resumed where you left off") }
+            gamepad.start()
             coreName = runner.coreDescription
             discs = runner.discCount > 1 ? Playlist.labels(for: game.url, count: runner.discCount) : []
             startedAt = Date()
@@ -283,7 +317,8 @@ final class EmulatorSession: ObservableObject {
     /// Tears everything down and returns how long the game ran, in seconds.
     @discardableResult
     func shutdown() -> Double {
-        runner.shutdown()
+        gamepad.stop()
+        runner.shutdown(writingAutoState: resumeOnLaunch)
         toastTask?.cancel()
         return Date().timeIntervalSince(startedAt)
     }

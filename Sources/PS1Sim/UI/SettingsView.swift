@@ -1,4 +1,5 @@
 import SwiftUI
+import GameController
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
@@ -8,11 +9,19 @@ struct SettingsView: View {
     @State private var tab = Tab.setup
     @State private var biosFiles = BIOS.installed
     @State private var capturing: Capture?
+    @State private var cards = MemoryCard.allCards()
+    @State private var cardNotice: String?
+    @State private var connectedPads = SettingsView.currentPads()
+
+    static func currentPads() -> [String] {
+        GCController.controllers().compactMap { $0.vendorName ?? "Controller" }
+    }
 
     enum Tab: String, CaseIterable, Identifiable {
         case setup = "Setup"
         case controls = "Controls"
         case video = "Video"
+        case cards = "Memory Cards"
         var id: String { rawValue }
     }
 
@@ -43,6 +52,7 @@ struct SettingsView: View {
                     case .setup: setupTab
                     case .controls: controlsTab
                     case .video: videoTab
+                    case .cards: cardsTab
                     }
                 }
                 .padding(18)
@@ -148,6 +158,22 @@ struct SettingsView: View {
                 (axis.label, settings.key(for: axis), Capture.axis(axis))
             })
 
+            section("Controller", detail: """
+            A DualSense, DualShock 4 or Xbox pad works as soon as macOS pairs it — \
+            no mapping needed, and it can be used alongside the keyboard. Face \
+            buttons follow their physical position, so the bottom button is Cross.
+            """) {
+                HStack(spacing: 7) {
+                    statusDot(!connectedPads.isEmpty)
+                    Text(connectedPads.isEmpty ? "No controller connected"
+                                               : connectedPads.joined(separator: ", "))
+                        .font(.system(size: 11.5))
+                    Spacer()
+                    Button("Check Again") { connectedPads = SettingsView.currentPads() }
+                        .controlSize(.small)
+                }
+            }
+
             section("Hotkeys", detail: nil) {
                 hotkeyRow("Pause / resume", "P")
                 hotkeyRow("Fast-forward", "Hold Tab")
@@ -213,7 +239,90 @@ struct SettingsView: View {
                 Text("Darkens alternate lines, the way a CRT television did.")
                     .font(.system(size: 10.5)).foregroundStyle(Theme.secondaryText)
             }
+            section("Sessions", detail: nil) {
+                Toggle("Resume where I left off", isOn: $settings.resumeOnLaunch)
+                Text("""
+                Saves a state when you leave a game and restores it next time you \
+                open it. Separate from the eight numbered slots, which are never \
+                touched by this.
+                """)
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+
+    // MARK: - Memory cards
+
+    private var cardsTab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            section("Cards", detail: """
+            One card per game, written by the emulator in the same format DuckStation \
+            and ePSXe use. A card appears here once a game has saved to it.
+            """) {
+                if cards.isEmpty {
+                    Text("No memory cards yet. They are created the first time a game saves.")
+                        .font(.system(size: 11)).foregroundStyle(Theme.secondaryText)
+                } else {
+                    ForEach(cards, id: \.url) { card in cardRow(card) }
+                }
+                HStack {
+                    Button("Refresh") { cards = MemoryCard.allCards() }
+                    Button("Show in Finder") { NSWorkspace.shared.open(Paths.saves) }
+                    if let cardNotice {
+                        Text(cardNotice).font(.system(size: 10.5))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                .controlSize(.small)
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func cardRow(_ card: MemoryCard) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(card.url.lastPathComponent)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                Spacer()
+                Text("\(card.usedBlocks) of 15 blocks used")
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.secondaryText)
+                Button("Back Up") {
+                    do {
+                        let copy = try card.backUp()
+                        cardNotice = "Backed up to \(copy.lastPathComponent)"
+                    } catch {
+                        cardNotice = "Backup failed: \(error.localizedDescription)"
+                    }
+                }
+                .controlSize(.small)
+            }
+            // A block gauge, the way the console's own card browser showed it.
+            HStack(spacing: 2) {
+                ForEach(0..<15, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(index < card.usedBlocks ? Theme.accent : Color.white.opacity(0.12))
+                        .frame(height: 6)
+                }
+            }
+            ForEach(card.saves) { save in
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.fill")
+                        .font(.system(size: 8)).foregroundStyle(Theme.secondaryText)
+                    Text(save.title).font(.system(size: 11))
+                    Text(save.filename)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(Theme.secondaryText)
+                    Spacer()
+                    Text("\(save.blocks) block\(save.blocks == 1 ? "" : "s")")
+                        .font(.system(size: 10)).foregroundStyle(Theme.secondaryText)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
     }
 
     // MARK: - Helpers

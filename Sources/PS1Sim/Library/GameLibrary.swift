@@ -145,18 +145,86 @@ final class GameLibrary: ObservableObject {
     }
 
     func setArtwork(_ imageURL: URL, for game: Game) {
-        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
-        let ext = imageURL.pathExtension.isEmpty ? "png" : imageURL.pathExtension
-        let name = "\(game.id.uuidString).\(ext)"
-        let destination = Paths.artwork.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: destination)
+        guard let image = NSImage(contentsOf: imageURL) else {
+            importError = "\(imageURL.lastPathComponent) could not be read as an image."
+            return
+        }
+        setArtwork(image, for: game)
+    }
+
+    /// Covers are normalised to PNG at a sane size. Box scans run to several
+    /// thousand pixels a side, which is wasted on a 220pt tile and slows the grid.
+    func setArtwork(_ image: NSImage, for game: Game) {
+        guard let index = games.firstIndex(where: { $0.id == game.id }),
+              let data = Self.pngData(from: image, maxEdge: 1024) else {
+            importError = "That image could not be converted."
+            return
+        }
+        // A fresh filename each time, so SwiftUI cannot show a cached older cover.
+        let name = "\(game.id.uuidString)-\(Int(Date().timeIntervalSince1970)).png"
         do {
-            try FileManager.default.copyItem(at: imageURL, to: destination)
+            try data.write(to: Paths.artwork.appendingPathComponent(name), options: .atomic)
+            if let old = games[index].artworkFile {
+                try? FileManager.default.removeItem(at: Paths.artwork.appendingPathComponent(old))
+            }
             games[index].artworkFile = name
             save()
         } catch {
-            importError = "Could not copy that image: \(error.localizedDescription)"
+            importError = "Could not save that cover: \(error.localizedDescription)"
         }
+    }
+
+    /// Points an existing entry at a different file — used after converting to CHD,
+    /// so play time, cover and save states survive the change.
+    func repoint(_ game: Game, to url: URL) {
+        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
+        games[index].path = url.path
+        save()
+    }
+
+    func removeArtwork(for game: Game) {
+        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
+        if let old = games[index].artworkFile {
+            try? FileManager.default.removeItem(at: Paths.artwork.appendingPathComponent(old))
+        }
+        games[index].artworkFile = nil
+        save()
+    }
+
+    func setCoverShowsWhole(_ whole: Bool, for game: Game) {
+        guard let index = games.firstIndex(where: { $0.id == game.id }) else { return }
+        games[index].coverShowsWhole = whole
+        save()
+    }
+
+    /// Pulls a cover off the clipboard — the usual way people get box art.
+    func pasteArtwork(for game: Game) {
+        guard let image = NSPasteboard.general.readObjects(forClasses: [NSImage.self])?
+                .first as? NSImage else {
+            importError = "There is no image on the clipboard."
+            return
+        }
+        setArtwork(image, for: game)
+    }
+
+    private static func pngData(from image: NSImage, maxEdge: CGFloat) -> Data? {
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let width = CGFloat(source.width), height = CGFloat(source.height)
+        let scale = min(1, maxEdge / max(width, height))
+        let target = CGSize(width: (width * scale).rounded(), height: (height * scale).rounded())
+
+        guard let context = CGContext(data: nil,
+                                      width: Int(target.width), height: Int(target.height),
+                                      bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(origin: .zero, size: target))
+        guard let resized = context.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: resized).representation(using: .png, properties: [:])
     }
 
     func recordSession(gameID: UUID, seconds: Double) {

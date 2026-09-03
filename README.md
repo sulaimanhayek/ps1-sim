@@ -64,6 +64,24 @@ adds one tile for the whole game. When the game asks for the next disc, use the
 — eject, change, insert. Importing the discs one at a time gives you separate
 tiles instead, with no way to swap; a hand-written `.m3u` also works.
 
+**Covers.** Right-click a tile → **Cover** to choose an image, paste one from the
+clipboard, or just drag an image file onto the tile. Tiles are square, matching a
+PlayStation jewel-case insert, and covers fill them edge to edge. For art that is
+not square, **Show Whole Cover** fits it inside the tile over a blurred copy of
+itself rather than cropping. Images are re-encoded to PNG at 1024px — a 4000px box
+scan would slow the grid down for no visible gain.
+
+**Converting to CHD.** Right-click a game → **Convert to CHD…** roughly halves the
+size of a `.cue`/`.bin` with no loss of quality, and the library entry follows the
+new file, keeping its cover, play time and save states. This needs `chdman` from
+MAME, which PS1Sim does not bundle:
+
+```bash
+brew install rom-tools
+```
+
+The original disc image is never deleted — that is your call.
+
 **PS1Sim ships no games and no BIOS.** Dump the discs you own with a USB optical
 drive (`cdrdao` on macOS, ImgBurn on Windows) to get `.bin`+`.cue` pairs.
 
@@ -80,8 +98,20 @@ Two independent systems, both real:
   the window, or quit with ⌘Q — but not if you force-quit.
 - **Save states.** Eight slots per game, snapshotting the entire machine —
   ⌘S saves slot 1, ⌘L loads it, and the **States** menu covers all eight.
+- **Resume where you left off.** On by default. Leaving a game writes a state
+  automatically and reopening it restores that point. It uses its own file, so it
+  can never overwrite one of the eight numbered slots. Turn it off in
+  Settings → Video → Sessions.
+
+Settings → **Memory Cards** shows every card, how many of its 15 blocks are in
+use, the saves on it by name, and can make a timestamped backup of any card.
 
 ## Controls
+
+A DualSense, DualShock 4 or Xbox controller works as soon as macOS pairs it — no
+setup, no mapping, and it can be used alongside the keyboard. Face buttons follow
+physical position, so the bottom button is Cross on any pad. Settings → Controls
+shows what is connected.
 
 | Action | Key |
 |---|---|
@@ -149,7 +179,10 @@ Check the core's licence before redistributing it.
 | `Core/LibretroCore.swift` | dlopen bridge: environment callbacks, pixel-format conversion, state serialization |
 | `Core/EmulatorSession.swift` | `EmulationRunner` owns the emulation thread and core; `EmulatorSession` is its main-actor face |
 | `Core/AudioOutput.swift` | Ring buffer feeding `AVAudioSourceNode` |
-| `Core/Input.swift` | Keyboard → DualShock mapping |
+| `Core/Input.swift` | Keyboard and controller → DualShock mapping |
+| `Core/Gamepad.swift` | GameController.framework bridge, feeding the same `InputState` |
+| `Core/ChdConverter.swift` | Drives `chdman` to convert disc images to CHD |
+| `Library/MemoryCard.swift` | Reads the PS1 card directory: blocks used and saves present |
 | `UI/MetalVideoView.swift` | Runtime-compiled Metal shader drawing the framebuffer |
 | `UI/LibraryView.swift` | Cover grid, import, search |
 | `UI/EmulatorView.swift` | In-game chrome and key handling |

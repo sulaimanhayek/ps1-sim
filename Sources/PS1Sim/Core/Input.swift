@@ -107,6 +107,22 @@ final class InputState: @unchecked Sendable {
     var buttonMap: [UInt16: PadButton] = InputState.defaultButtonMap
     var axisMap: [UInt16: PadAxis] = InputState.defaultAxisMap
 
+    /// Latest physical controller state, if one is connected. Kept separate from
+    /// the keyboard so neither can clear the other's buttons.
+    private var padButtons = Set<PadButton>()
+    private var padAxes: [UInt32: Int16] = [:]
+
+    /// Packs a libretro (stick index, axis id) pair into one dictionary key.
+    static func axisKey(index: UInt32, axis: UInt32) -> UInt32 { index << 8 | axis }
+
+    func setGamepad(buttons: Set<PadButton>, axes: [UInt32: Int16]) {
+        lock.lock(); padButtons = buttons; padAxes = axes; lock.unlock()
+    }
+
+    func clearGamepad() {
+        lock.lock(); padButtons.removeAll(); padAxes.removeAll(); lock.unlock()
+    }
+
     static let defaultButtonMap: [UInt16: PadButton] = [
         126: .up, 125: .down, 123: .left, 124: .right,
         7: .cross,       // X
@@ -143,6 +159,7 @@ final class InputState: @unchecked Sendable {
     /// True if any key bound to `button` is currently held.
     func isPressed(_ button: PadButton) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        if padButtons.contains(button) { return true }
         for (code, mapped) in buttonMap where mapped == button && pressed.contains(code) {
             return true
         }
@@ -159,7 +176,11 @@ final class InputState: @unchecked Sendable {
                 value += Int32(target.sign) * 32767
             }
         }
-        return Int16(max(-32767, min(32767, value)))
+        let keyboard = Int16(max(-32767, min(32767, value)))
+        // Whichever input is pushed further wins, so a resting stick never cancels
+        // a held key and a held key never caps the stick.
+        let stick = padAxes[InputState.axisKey(index: index, axis: axis)] ?? 0
+        return abs(Int32(stick)) > abs(Int32(keyboard)) ? stick : keyboard
     }
 
     /// Is this key bound to anything? Used to decide whether to swallow the event.

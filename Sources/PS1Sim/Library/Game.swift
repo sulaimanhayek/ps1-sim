@@ -11,6 +11,9 @@ struct Game: Identifiable, Codable, Hashable {
     var playSeconds: Double
     /// Filename inside Paths.artwork, if the user picked cover art.
     var artworkFile: String?
+    /// Show the whole cover inside the square tile instead of cropping it to fill.
+    /// Optional so a library written before covers were adjustable still decodes.
+    var coverShowsWhole: Bool?
 
     init(title: String, path: String) {
         self.id = UUID()
@@ -26,6 +29,8 @@ struct Game: Identifiable, Codable, Hashable {
     var artworkURL: URL? {
         artworkFile.map { Paths.artwork.appendingPathComponent($0) }
     }
+
+    var fitsWholeCover: Bool { coverShowsWhole ?? false }
 
     /// Deterministic accent colour derived from the title, for the placeholder cover.
     var accent: Color {
