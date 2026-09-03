@@ -15,3 +15,5 @@ void ps1sim_log_printf(int level, const char *fmt, ...) {
     va_end(ap);
     g_sink(level, buf);
 }
+
+void *ps1sim_log_function(void) { return (void *)ps1sim_log_printf; }

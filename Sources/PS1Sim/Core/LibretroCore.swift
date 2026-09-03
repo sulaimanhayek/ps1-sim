@@ -115,7 +115,8 @@ final class LibretroCore: @unchecked Sendable {
             throw CoreError.missingCore(corePath.path)
         }
         guard let handle = dlopen(corePath.path, RTLD_LAZY | RTLD_LOCAL) else {
-            throw CoreError.dlopenFailed(String(cString: dlerror() ?? UnsafeMutablePointer(mutating: "unknown")))
+            let reason = dlerror().map { String(cString: $0) } ?? "unknown error"
+            throw CoreError.dlopenFailed(reason)
         }
         self.handle = handle
 
@@ -280,8 +281,7 @@ final class LibretroCore: @unchecked Sendable {
 
         case 27: // GET_LOG_INTERFACE
             data?.assumingMemoryBound(to: retro_log_callback.self).pointee =
-                retro_log_callback(log: unsafeBitCast(ps1sim_log_printf as @convention(c) (Int32, UnsafePointer<CChar>?) -> Void,
-                                                      to: UnsafeMutableRawPointer.self))
+                retro_log_callback(log: ps1sim_log_function())
             return true
 
         case 52: // GET_CORE_OPTIONS_VERSION — 0 makes the core use plain SET_VARIABLES

@@ -65,4 +65,8 @@ void ps1sim_set_log_sink(ps1sim_log_sink_t sink);
 /// Variadic entry point handed to the core as retro_log_callback.log.
 void ps1sim_log_printf(int level, const char *fmt, ...);
 
+/// Address of ps1sim_log_printf. Swift cannot reference a variadic C function
+/// directly, so it asks C for the pointer.
+void *ps1sim_log_function(void);
+
 #endif
