@@ -16,6 +16,8 @@ enum Paths {
     static var states: URL { root.appendingPathComponent("states", isDirectory: true) }
     static var artwork: URL { root.appendingPathComponent("artwork", isDirectory: true) }
     static var generatedCues: URL { root.appendingPathComponent("cues", isDirectory: true) }
+    /// .m3u playlists we write when a multi-disc game is imported.
+    static var playlists: URL { root.appendingPathComponent("playlists", isDirectory: true) }
 
     static var libraryFile: URL { root.appendingPathComponent("library.json") }
     static var settingsFile: URL { root.appendingPathComponent("settings.json") }
@@ -27,7 +29,7 @@ enum Paths {
     }
 
     static func createDirectories() {
-        for dir in [root, cores, system, saves, states, artwork, generatedCues] {
+        for dir in [root, cores, system, saves, states, artwork, generatedCues, playlists] {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }

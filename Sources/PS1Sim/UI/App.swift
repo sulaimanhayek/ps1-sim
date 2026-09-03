@@ -33,6 +33,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// ⌘Q and the window's close button both bypass "Exit to Library". The core
+    /// writes the memory card during retro_unload_game, so without this the app
+    /// would exit with the card still only in memory and lose whatever the player
+    /// had just saved in-game.
+    func applicationWillTerminate(_ notification: Notification) {
+        RunningSession.shared.shutdown()
+    }
+}
+
+/// A main-thread handle on the game that is currently running, so app termination
+/// can tear it down. RootView keeps a SwiftUI `@State` session, which the app
+/// delegate has no way to reach on its own.
+@MainActor
+final class RunningSession {
+    static let shared = RunningSession()
+
+    private var session: EmulatorSession?
+    private var library: GameLibrary?
+
+    func begin(_ session: EmulatorSession, library: GameLibrary) {
+        self.session = session
+        self.library = library
+    }
+
+    /// Tears the session down exactly once, whether that is triggered by leaving
+    /// the game or by quitting the app.
+    func shutdown() {
+        guard let session else { return }
+        self.session = nil
+        let seconds = session.shutdown()
+        library?.recordSession(gameID: session.game.id, seconds: seconds)
+    }
 }
 
 /// Switches between the library and a running game.
@@ -58,14 +91,13 @@ struct RootView: View {
     private func launch(_ game: Game) {
         let session = EmulatorSession(game: game, settings: settings)
         session.start()
+        RunningSession.shared.begin(session, library: library)
         self.session = session
     }
 
     private func endSession() {
-        guard let session else { return }
-        let seconds = session.shutdown()
-        library.recordSession(gameID: session.game.id, seconds: seconds)
-        self.session = nil
+        RunningSession.shared.shutdown()
+        session = nil
     }
 }
 

@@ -76,6 +76,10 @@ final class LibretroCore: @unchecked Sendable {
     /// RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1) as reported by this core.
     static let dualShockDevice: UInt32 = 517
 
+    /// The virtual disc tray, handed over by the core when a multi-disc playlist
+    /// is loaded. nil for a single-disc game.
+    private var diskControl: retro_disk_control_callback?
+
     /// 0 = RGB1555, 1 = XRGB8888, 2 = RGB565.
     private var pixelFormat: UInt32 = 0
     private var geometryAspect: Float = 4.0 / 3.0
@@ -251,6 +255,25 @@ final class LibretroCore: @unchecked Sendable {
         }
     }
 
+    // MARK: - Discs
+
+    /// Number of discs in the loaded playlist. 0 or 1 means there is nothing to swap.
+    var discCount: Int { Int(diskControl?.get_num_images?() ?? 0) }
+
+    var currentDisc: Int { Int(diskControl?.get_image_index?() ?? 0) }
+
+    /// Swaps the disc, imitating what a player does at the console: open the tray,
+    /// change the disc, close it. Games watch for the tray opening and closing, so
+    /// setting the index on its own is not enough — must be called on the
+    /// emulation thread, between frames.
+    func selectDisc(_ index: Int) -> Bool {
+        guard let tray = diskControl, index >= 0, index < discCount else { return false }
+        _ = tray.set_eject_state?(true)
+        let swapped = tray.set_image_index?(UInt32(index)) ?? false
+        _ = tray.set_eject_state?(false)
+        return swapped
+    }
+
     // MARK: - Environment
 
     private func handleEnvironment(_ rawCommand: UInt32, _ data: UnsafeMutableRawPointer?) -> Bool {
@@ -324,6 +347,17 @@ final class LibretroCore: @unchecked Sendable {
                 if av.timing.fps > 0 { fps = av.timing.fps }
             }
             return true
+
+        case 13: // SET_DISK_CONTROL_INTERFACE
+            guard let data else { return false }
+            diskControl = data.assumingMemoryBound(to: retro_disk_control_callback.self).pointee
+            return true
+
+        case 56: // GET_DISK_CONTROL_INTERFACE_VERSION
+            // Declining leaves the core on the v0 interface above, which is all a
+            // disc swap needs. The ext interface only adds labels and paths, and we
+            // read those out of the .m3u ourselves.
+            return false
 
         case 6: // SET_MESSAGE
             if let data {

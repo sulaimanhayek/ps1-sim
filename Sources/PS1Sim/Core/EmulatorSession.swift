@@ -9,6 +9,7 @@ final class EmulationRunner: @unchecked Sendable {
     enum Event {
         case message(String)
         case slotsChanged
+        case discChanged(Int)
     }
 
     let input = InputState()
@@ -26,6 +27,11 @@ final class EmulationRunner: @unchecked Sendable {
     private var pendingSaveSlot: Int?
     private var pendingLoadSlot: Int?
     private var pendingReset = false
+    private var pendingDiscIndex: Int?
+
+    /// Discs in the loaded playlist, read once after the game loads. A single-disc
+    /// game reports 0 or 1 and the UI hides the tray entirely.
+    private(set) var discCount = 0
 
     /// Delivered on the main queue.
     var onEvent: ((Event) -> Void)?
@@ -70,6 +76,7 @@ final class EmulationRunner: @unchecked Sendable {
             throw error
         }
 
+        discCount = core.discCount
         audio.start(sampleRate: core.sampleRate)
 
         let thread = Thread { [weak self] in self?.emulationLoop() }
@@ -116,6 +123,10 @@ final class EmulationRunner: @unchecked Sendable {
         controlLock.lock(); pendingLoadSlot = slot; controlLock.unlock()
     }
 
+    func requestDisc(_ index: Int) {
+        controlLock.lock(); pendingDiscIndex = index; controlLock.unlock()
+    }
+
     private func emit(_ event: Event) {
         DispatchQueue.main.async { [onEvent] in onEvent?(event) }
     }
@@ -135,12 +146,20 @@ final class EmulationRunner: @unchecked Sendable {
             let saveSlot = pendingSaveSlot; pendingSaveSlot = nil
             let loadSlot = pendingLoadSlot; pendingLoadSlot = nil
             let reset = pendingReset; pendingReset = false
+            let discIndex = pendingDiscIndex; pendingDiscIndex = nil
             controlLock.unlock()
 
             if stop { break }
             if reset { core.reset(); emit(.message("Reset")) }
             if let slot = saveSlot { performSave(core: core, slot: slot) }
             if let slot = loadSlot { performLoad(core: core, slot: slot) }
+            if let index = discIndex {
+                if core.selectDisc(index) {
+                    emit(.discChanged(index))
+                } else {
+                    emit(.message("Could not change disc"))
+                }
+            }
 
             if pausedNow {
                 Thread.sleep(forTimeInterval: 0.016)
@@ -219,6 +238,9 @@ final class EmulatorSession: ObservableObject {
     @Published var toast: String?
     /// Slots 1-8 that currently hold a save state.
     @Published private(set) var occupiedSlots: Set<Int> = []
+    /// One entry per disc in the playlist; empty for a single-disc game.
+    @Published private(set) var discs: [String] = []
+    @Published private(set) var currentDisc = 0
 
     let game: Game
     private let runner: EmulationRunner
@@ -237,6 +259,9 @@ final class EmulatorSession: ObservableObject {
             switch event {
             case .message(let text): self.show(text)
             case .slotsChanged: self.refreshSlots()
+            case .discChanged(let index):
+                self.currentDisc = index
+                self.show("Inserted \(self.discs.indices.contains(index) ? self.discs[index] : "disc \(index + 1)")")
             }
         }
         refreshSlots()
@@ -247,6 +272,7 @@ final class EmulatorSession: ObservableObject {
         do {
             try runner.start(discURL: game.url)
             coreName = runner.coreDescription
+            discs = runner.discCount > 1 ? Playlist.labels(for: game.url, count: runner.discCount) : []
             startedAt = Date()
             status = .running
         } catch {
@@ -280,6 +306,11 @@ final class EmulatorSession: ObservableObject {
     func requestReset() { runner.requestReset() }
 
     func saveState(slot: Int) { runner.requestSave(slot: slot) }
+
+    func selectDisc(_ index: Int) {
+        guard index != currentDisc, discs.indices.contains(index) else { return }
+        runner.requestDisc(index)
+    }
 
     func loadState(slot: Int) {
         guard occupiedSlots.contains(slot) else {
@@ -338,6 +369,25 @@ final class FrameStore: @unchecked Sendable {
         pixels.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return }
             body(base, width, height, aspect)
+        }
+    }
+}
+
+/// Reads the disc names out of an .m3u so the tray menu can show "Disc 2" rather
+/// than an index. The core's v0 disc interface reports no labels of its own.
+enum Playlist {
+    static func labels(for url: URL, count: Int) -> [String] {
+        var names: [String] = []
+        if url.pathExtension.lowercased() == "m3u",
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            names = text.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                .map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
+        }
+        // The core is the authority on how many discs it actually mounted.
+        return (0..<count).map { index in
+            names.indices.contains(index) ? names[index] : "Disc \(index + 1)"
         }
     }
 }

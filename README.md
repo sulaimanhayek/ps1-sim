@@ -56,8 +56,13 @@ your multi-gigabyte disc images. Each game becomes a tile on the home screen;
 double-click to play. A bare `.bin` with no sibling `.cue` gets one generated
 automatically.
 
-For multi-disc games like Parasite Eve, list each disc's `.cue` in a `.m3u` file,
-one per line, and import that — the core can then swap discs in place.
+**Multi-disc games.** Select every disc at once in the import dialog — or drag
+them in together — and PS1Sim recognises names like `Game (Disc 1).cue` /
+`(Disc 2)`, `[Disk 2]`, `CD2` and `- disc_1`, then writes a `.m3u` playlist and
+adds one tile for the whole game. When the game asks for the next disc, use the
+**Discs** menu in the control bar; it works the tray exactly as a player would
+— eject, change, insert. Importing the discs one at a time gives you separate
+tiles instead, with no way to swap; a hand-written `.m3u` also works.
 
 **PS1Sim ships no games and no BIOS.** Dump the discs you own with a USB optical
 drive (`cdrdao` on macOS, ImgBurn on Windows) to get `.bin`+`.cue` pairs.
@@ -70,7 +75,9 @@ Two independent systems, both real:
   `~/Library/Application Support/PS1Sim/saves/`, named after the game's serial
   (`SLUS-00662_1.mcd`). Two cards are provided, as on real hardware, and the
   format is the one DuckStation and ePSXe read, so cards move between emulators.
-  This is the save the game itself knows about.
+  This is the save the game itself knows about. The card is written to disk when
+  the game shuts down, which happens whether you leave for the library, close
+  the window, or quit with ⌘Q — but not if you force-quit.
 - **Save states.** Eight slots per game, snapshotting the entire machine —
   ⌘S saves slot 1, ⌘L loads it, and the **States** menu covers all eight.
 

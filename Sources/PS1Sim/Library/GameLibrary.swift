@@ -9,6 +9,8 @@ final class GameLibrary: ObservableObject {
     @Published var importError: String?
 
     static let discExtensions = ["cue", "chd", "pbp", "m3u", "bin", "img", "iso", "exe", "ccd", "toc"]
+    /// Recognised only so the import error can say what is actually wrong.
+    static let archiveExtensions = ["7z", "zip", "rar", "gz", "tar", "bz2", "xz"]
 
     init() {
         Paths.createDirectories()
@@ -33,20 +35,98 @@ final class GameLibrary: ObservableObject {
     // MARK: - Mutation
 
     func addGames(from urls: [URL]) {
-        var added = 0
+        var resolved: [URL] = []
         for url in urls {
             switch resolveDisc(at: url) {
-            case .success(let resolved):
-                guard !games.contains(where: { $0.path == resolved.path }) else { continue }
-                games.append(Game(title: prettyTitle(for: resolved), path: resolved.path))
-                added += 1
-            case .failure(let message):
-                importError = message
+            case .success(let disc): resolved.append(disc)
+            case .failure(let message): importError = message
             }
+        }
+
+        var added = 0
+        for entry in collapseMultiDisc(resolved) {
+            guard !games.contains(where: { $0.path == entry.url.path }) else { continue }
+            games.append(Game(title: entry.title, path: entry.url.path))
+            added += 1
         }
         if added > 0 {
             games.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
             save()
+        }
+    }
+
+    // MARK: - Multi-disc games
+
+    private struct Entry {
+        let url: URL
+        let title: String
+    }
+
+    /// Turns "Game (Disc 1).cue" and "Game (Disc 2).cue" into a single library
+    /// entry backed by a generated .m3u, which is what lets the core swap discs
+    /// mid-game. Discs imported one at a time stay separate entries; import them
+    /// together to get the playlist.
+    private func collapseMultiDisc(_ urls: [URL]) -> [Entry] {
+        var order: [String] = []
+        var groups: [String: [(disc: Int, url: URL)]] = [:]
+
+        for url in urls {
+            let key = groupingTitle(for: url)
+            if order.firstIndex(of: key) == nil { order.append(key) }
+            groups[key, default: []].append((discNumber(in: url) ?? 1, url))
+        }
+
+        return order.compactMap { title in
+            guard let discs = groups[title] else { return nil }
+            guard discs.count > 1, Set(discs.map(\.disc)).count == discs.count else {
+                // Left alone, a lone disc keeps the name it had on disk.
+                return Entry(url: discs[0].url, title: prettyTitle(for: discs[0].url))
+            }
+            let sorted = discs.sorted { $0.disc < $1.disc }.map(\.url)
+            guard let playlist = writePlaylist(named: title, discs: sorted) else {
+                return Entry(url: sorted[0], title: title)
+            }
+            return Entry(url: playlist, title: title)
+        }
+    }
+
+    /// The title two discs of the same game share. prettyTitle only strips
+    /// bracketed decorations, so "Chrono Cross CD1" keeps its disc marker and
+    /// would never group with CD2; this drops the marker wherever it appears.
+    private func groupingTitle(for url: URL) -> String {
+        var name = prettyTitle(for: url)
+        name = name.replacingOccurrences(of: Self.discMarker, with: " ",
+                                         options: [.regularExpression, .caseInsensitive])
+        name = name.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return name.trimmingCharacters(in: CharacterSet(charactersIn: " -_")).isEmpty
+            ? prettyTitle(for: url)
+            : name.trimmingCharacters(in: CharacterSet(charactersIn: " -_"))
+    }
+
+    private static let discMarker = #"[-_ ]*(?:dis[ck]|cd)\s*[-_]?\s*\d{1,2}"#
+
+    /// The disc number in a filename: "(Disc 2)", "[Disk 2]", "CD2".
+    private func discNumber(in url: URL) -> Int? {
+        let name = url.deletingPathExtension().lastPathComponent
+        let pattern = Self.discMarker
+        guard let match = name.range(of: pattern, options: [.regularExpression, .caseInsensitive]),
+              let digits = name[match].range(of: #"\d{1,2}"#, options: .regularExpression) else {
+            return nil
+        }
+        return Int(name[digits])
+    }
+
+    private func writePlaylist(named title: String, discs: [URL]) -> URL? {
+        let safe = title.replacingOccurrences(of: "/", with: "-")
+        let url = Paths.playlists.appendingPathComponent("\(safe).m3u")
+        // Absolute paths: the discs stay wherever the user keeps them, and the
+        // playlist lives in our own directory, so relative paths would not resolve.
+        let contents = discs.map(\.path).joined(separator: "\n") + "\n"
+        do {
+            try contents.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            return nil
         }
     }
 
@@ -98,7 +178,16 @@ final class GameLibrary: ObservableObject {
     private func resolveDisc(at url: URL) -> Resolution {
         let ext = url.pathExtension.lowercased()
         guard Self.discExtensions.contains(ext) else {
-            return .failure("\(url.lastPathComponent) is not a PlayStation disc image.")
+            if Self.archiveExtensions.contains(ext) {
+                return .failure("""
+                \(url.lastPathComponent) is a \(ext.uppercased()) archive. \
+                Extract it first, then import the .cue or .bin inside it.
+                """)
+            }
+            return .failure("""
+            \(url.lastPathComponent) is not a disc image PS1Sim can open. \
+            Supported: \(Self.discExtensions.joined(separator: ", ")).
+            """)
         }
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure("\(url.lastPathComponent) could not be found.")

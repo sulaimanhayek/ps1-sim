@@ -57,6 +57,20 @@ struct retro_message {
     unsigned    frames;
 };
 
+// The core hands this over for multi-disc games so the frontend can work the
+// virtual disc tray. Only the v0 interface is declared: PS1Sim answers
+// GET_DISK_CONTROL_INTERFACE_VERSION with "unsupported", which makes the core
+// register through SET_DISK_CONTROL_INTERFACE with exactly this struct.
+struct retro_disk_control_callback {
+    bool     (*set_eject_state)(bool ejected);
+    bool     (*get_eject_state)(void);
+    unsigned (*get_image_index)(void);
+    bool     (*set_image_index)(unsigned index);
+    unsigned (*get_num_images)(void);
+    bool     (*replace_image_index)(unsigned index, const struct retro_game_info *info);
+    bool     (*add_image_index)(void);
+};
+
 typedef void (*ps1sim_log_sink_t)(int level, const char *msg);
 
 /// Install the Swift-side receiver for core log lines.

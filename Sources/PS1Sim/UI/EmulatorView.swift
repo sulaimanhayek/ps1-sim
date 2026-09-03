@@ -167,6 +167,24 @@ struct EmulatorView: View {
             .frame(width: 92)
             .help("Save states — ⌘S saves slot 1, ⌘L loads it")
 
+            if session.discs.count > 1 {
+                Menu {
+                    ForEach(Array(session.discs.enumerated()), id: \.offset) { index, name in
+                        Button {
+                            session.selectDisc(index)
+                        } label: {
+                            Label(name, systemImage: index == session.currentDisc ? "checkmark" : "opticaldisc")
+                        }
+                        .disabled(index == session.currentDisc)
+                    }
+                } label: {
+                    Label("Discs", systemImage: "opticaldisc")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 86)
+                .help("Swap discs — do this when the game asks for the next one")
+            }
+
             Button { session.requestReset() } label: { Image(systemName: "arrow.counterclockwise") }
                 .help("Reset the console")
 
