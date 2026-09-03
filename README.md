@@ -1,0 +1,162 @@
+# PS1Sim
+
+A native macOS PlayStation 1 front-end. Smooth SwiftUI interface, Metal rendering,
+a cover-art library you import into once, real save states, and keyboard controls.
+
+![status](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)
+
+## What this is, honestly
+
+PS1Sim is the **application** — library, renderer, audio, input, save states,
+packaging. The **emulation** itself is done by [pcsx_rearmed](https://github.com/libretro/pcsx_rearmed),
+a mature libretro core that PS1Sim loads at runtime.
+
+That split is deliberate. A from-scratch PS1 core — R3000A CPU with a dynamic
+recompiler, GTE, the GPU's rasteriser and its quirks, SPU with reverb, MDEC video
+decoding, CD-ROM subchannel timing — is a multi-year project, and a half-finished
+one boots nothing. Building the front-end on a proven core means your games
+actually run, today, with accurate timing and working memory cards.
+
+## Install
+
+Download the DMG from [Releases](../../releases), drag **PS1Sim** to Applications,
+then clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/PS1Sim.app
+```
+
+The build is ad-hoc signed rather than notarized (notarization needs a paid Apple
+Developer account), so macOS blocks it until you run that command. You can also
+right-click the app and choose **Open** the first time.
+
+## First run
+
+Open **Settings** (⌘,) and complete two steps. The library shows an orange banner
+until both are done.
+
+**1. Install the emulator core.** Press **Download Core** to fetch
+`pcsx_rearmed_libretro.dylib` from `buildbot.libretro.com`, the official libretro
+build server. PS1Sim clears its quarantine flag and ad-hoc signs it so macOS will
+load it. If you already have a core, use **Choose Core File…** instead.
+
+**2. Add a PlayStation BIOS.** This is the ~512 KB firmware from a real PS1 —
+the boot screen, disc check, and memory-card manager that games call into. It is
+Sony's copyrighted code and cannot be distributed, so you dump it from a console
+you own. Drop `scph5501.bin` (US), `scph5502.bin` (EU) or `scph5500.bin` (JP)
+into the system folder via **Add BIOS File…**.
+
+## Adding games
+
+Press **Import Game** (⌘I) or drag disc images onto the window. Supported:
+`.cue`, `.chd`, `.pbp`, `.m3u`, `.iso`, `.bin`, `.img`, `.exe`.
+
+Games are referenced where they sit — importing records a path, it does not copy
+your multi-gigabyte disc images. Each game becomes a tile on the home screen;
+double-click to play. A bare `.bin` with no sibling `.cue` gets one generated
+automatically.
+
+For multi-disc games like Parasite Eve, list each disc's `.cue` in a `.m3u` file,
+one per line, and import that — the core can then swap discs in place.
+
+**PS1Sim ships no games and no BIOS.** Dump the discs you own with a USB optical
+drive (`cdrdao` on macOS, ImgBurn on Windows) to get `.bin`+`.cue` pairs.
+
+## Saving
+
+Two independent systems, both real:
+
+- **Memory cards.** The in-game save menu writes to a virtual memory card in
+  `~/Library/Application Support/PS1Sim/saves/`, flushed when you exit to the
+  library. This is the save the game itself knows about.
+- **Save states.** Eight slots per game, snapshotting the entire machine —
+  ⌘S saves slot 1, ⌘L loads it, and the **States** menu covers all eight.
+
+## Controls
+
+| Action | Key |
+|---|---|
+| D-Pad | Arrow keys |
+| ✕ / ○ / ▢ / △ | X / C / Z / S |
+| L1 / R1 | A / D |
+| L2 / R2 | Q / E |
+| L3 / R3 | R / T |
+| Start / Select | Return / Right Shift |
+| Left analog stick | I / J / K / L |
+| Pause | P |
+| Fast-forward | Hold Tab |
+| Save / load state slot 1 | ⌘S / ⌘L |
+| Reset console | ⌘R |
+| Full screen | ⌘F |
+| Back to library | Esc or ⌘W |
+
+Every button and stick direction is rebindable in **Settings › Controls** — click
+a binding, press the key you want.
+
+## Video options
+
+Smooth (bilinear) scaling, integer scaling that snaps to whole multiples of the
+native resolution, and optional CRT scanlines. The picture is always letterboxed
+to the game's aspect ratio.
+
+## Building from source
+
+Requires macOS 13+ and the Xcode command line tools.
+
+```bash
+swift build -c release          # binary only
+scripts/build_app.sh 1.0.0      # universal .app + DMG in ./dist
+```
+
+The build script compiles arm64 and x86_64 separately and `lipo`s them, so a full
+Xcode install is not required. The app icon is rendered from code by
+`scripts/make_icon.swift`, so the repo carries no binary assets.
+
+### Cutting a release
+
+Push a tag and GitHub Actions builds and publishes the DMG:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+To ship a core inside the app instead of downloading it, drop the `.dylib` in
+`packaging/cores/` before building — it is bundled and adopted on first run.
+Check the core's licence before redistributing it.
+
+## Architecture
+
+| File | Role |
+|---|---|
+| `Sources/CLibretro/` | Minimal libretro ABI header, plus a varargs log shim Swift cannot express |
+| `Core/LibretroCore.swift` | dlopen bridge: environment callbacks, pixel-format conversion, state serialization |
+| `Core/EmulatorSession.swift` | `EmulationRunner` owns the emulation thread and core; `EmulatorSession` is its main-actor face |
+| `Core/AudioOutput.swift` | Ring buffer feeding `AVAudioSourceNode` |
+| `Core/Input.swift` | Keyboard → DualShock mapping |
+| `UI/MetalVideoView.swift` | Runtime-compiled Metal shader drawing the framebuffer |
+| `UI/LibraryView.swift` | Cover grid, import, search |
+| `UI/EmulatorView.swift` | In-game chrome and key handling |
+
+Frame pacing runs on the wall clock, nudged by how full the audio ring buffer is,
+so video stays locked to the sound card rather than drifting against it.
+
+## Where your data lives
+
+```
+~/Library/Application Support/PS1Sim/
+├── cores/      emulator core
+├── system/     BIOS images
+├── saves/      memory cards
+├── states/     save states, one folder per game
+├── artwork/    cover art you picked
+└── library.json
+```
+
+## Legal
+
+PS1Sim contains no Sony code, no BIOS, and no games. You supply a BIOS dumped
+from hardware you own and disc images of games you own. Emulator software is
+lawful; downloading BIOS images or games you do not own is not.
+
+"PlayStation" is a trademark of Sony Interactive Entertainment. This project is
+not affiliated with or endorsed by Sony.
