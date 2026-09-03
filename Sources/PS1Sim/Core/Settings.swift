@@ -6,6 +6,7 @@ final class Settings: ObservableObject {
     @Published var smoothScaling: Bool { didSet { save() } }
     @Published var integerScaling: Bool { didSet { save() } }
     @Published var crtScanlines: Bool { didSet { save() } }
+    @Published var showControlHints: Bool { didSet { save() } }
     @Published var buttonMap: [UInt16: PadButton] { didSet { save() } }
     @Published var axisMap: [UInt16: PadAxis] { didSet { save() } }
 
@@ -13,6 +14,7 @@ final class Settings: ObservableObject {
         var smoothScaling: Bool
         var integerScaling: Bool
         var crtScanlines: Bool
+        var showControlHints: Bool?
         var buttonMap: [String: PadButton]
         var axisMap: [String: PadAxis]
     }
@@ -22,6 +24,7 @@ final class Settings: ObservableObject {
         smoothScaling = stored?.smoothScaling ?? true
         integerScaling = stored?.integerScaling ?? false
         crtScanlines = stored?.crtScanlines ?? false
+        showControlHints = stored?.showControlHints ?? true
         if let map = stored?.buttonMap {
             buttonMap = Dictionary(uniqueKeysWithValues: map.compactMap { key, value in
                 UInt16(key).map { ($0, value) }
@@ -73,6 +76,7 @@ final class Settings: ObservableObject {
             smoothScaling: smoothScaling,
             integerScaling: integerScaling,
             crtScanlines: crtScanlines,
+            showControlHints: showControlHints,
             buttonMap: Dictionary(uniqueKeysWithValues: buttonMap.map { (String($0.key), $0.value) }),
             axisMap: Dictionary(uniqueKeysWithValues: axisMap.map { (String($0.key), $0.value) })
         )

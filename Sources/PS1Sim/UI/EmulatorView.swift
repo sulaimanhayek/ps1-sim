@@ -12,6 +12,9 @@ struct EmulatorView: View {
     @State private var showControls = true
     @State private var hideTask: Task<Void, Never>?
     @State private var showStateMenu = false
+    @State private var hintsFaded = false
+    @State private var hintsHaveSettled = false
+    @State private var fadeTask: Task<Void, Never>?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -33,14 +36,99 @@ struct EmulatorView: View {
 
             if showControls, session.status != .starting { controlBar.transition(.move(edge: .top).combined(with: .opacity)) }
 
+            if settings.showControlHints, session.status == .running || session.status == .paused {
+                controlHints.transition(.opacity)
+            }
+
             if session.paused { pausedOverlay }
         }
         .overlay(alignment: .bottom) { toast }
         .animation(.easeInOut(duration: 0.2), value: showControls)
-        .onAppear { installKeyMonitor(); scheduleHide() }
-        .onDisappear { removeKeyMonitor() }
+        .onAppear { installKeyMonitor(); scheduleHide(); scheduleHintFade() }
+        .onDisappear { removeKeyMonitor(); fadeTask?.cancel() }
         .onContinuousHover { phase in
             if case .active = phase { reveal() }
+        }
+    }
+
+    // MARK: - Control reminder
+
+    /// Reads the user's actual bindings, so rebinding a key updates this too.
+    private var padHints: [(label: String, key: String)] {
+        var rows: [(String, String)] = []
+        let directions: [PadButton] = [.up, .down, .left, .right]
+        let arrows = directions.compactMap { settings.key(for: $0).map(KeyCode.name(for:)) }
+        if arrows.count == directions.count {
+            rows.append(("Move", arrows.joined(separator: " ")))
+        }
+        for button in [PadButton.cross, .circle, .square, .triangle, .l1, .r1, .start, .select] {
+            guard let key = settings.key(for: button) else { continue }
+            rows.append((button.label, KeyCode.name(for: key)))
+        }
+        return rows
+    }
+
+    private let hotkeyHints: [(label: String, key: String)] = [
+        ("Pause", "P"),
+        ("Fast-forward", "Tab"),
+        ("Save state", "\u{2318}S"),
+        ("Load state", "\u{2318}L"),
+        ("Hide this", "H"),
+    ]
+
+    private var controlHints: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "gamecontroller.fill").font(.system(size: 9))
+                Text("CONTROLS").font(.system(size: 9, weight: .bold)).tracking(0.8)
+                Spacer(minLength: 10)
+                Button { settings.showControlHints = false } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundStyle(.white.opacity(0.5))
+
+            ForEach(padHints, id: \.label) { hint in hintRow(hint.label, hint.key) }
+
+            Text("\u{2715} confirms, \u{25CB} cancels")
+                .font(.system(size: 8.5))
+                .foregroundStyle(.white.opacity(0.4))
+                .padding(.top, 1)
+
+            Divider().overlay(Color.white.opacity(0.14)).padding(.vertical, 1)
+
+            ForEach(hotkeyHints, id: \.label) { hint in hintRow(hint.label, hint.key) }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .frame(width: 168)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.10)))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+        .opacity(hintsFaded ? 0.28 : 0.92)
+        .animation(.easeInOut(duration: 0.45), value: hintsFaded)
+        .onHover { hovering in hintsFaded = hovering ? false : hintsHaveSettled }
+        // Sits clear of the control bar so the two never overlap.
+        .padding(.top, showControls ? 58 : 14)
+        .padding(.trailing, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .allowsHitTesting(true)
+    }
+
+    private func hintRow(_ label: String, _ key: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.72))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(key)
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.13), in: RoundedRectangle(cornerRadius: 4))
         }
     }
 
@@ -81,6 +169,11 @@ struct EmulatorView: View {
 
             Button { session.requestReset() } label: { Image(systemName: "arrow.counterclockwise") }
                 .help("Reset the console")
+
+            Button { toggleHints() } label: {
+                Image(systemName: settings.showControlHints ? "keyboard.fill" : "keyboard")
+            }
+            .help("Show or hide the control reminder (H)")
 
             Button { toggleFullScreen() } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -161,6 +254,29 @@ struct EmulatorView: View {
         }
     }
 
+    private func toggleHints() {
+        settings.showControlHints.toggle()
+        if settings.showControlHints {
+            hintsFaded = false
+            hintsHaveSettled = false
+            scheduleHintFade()
+        }
+    }
+
+    /// The reminder is bright while you are learning the keys, then dims so it
+    /// stops competing with the game. Hovering it brings it back.
+    private func scheduleHintFade() {
+        fadeTask?.cancel()
+        fadeTask = Task {
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                hintsHaveSettled = true
+                hintsFaded = true
+            }
+        }
+    }
+
     private func toggleFullScreen() {
         NSApp.keyWindow?.toggleFullScreen(nil)
     }
@@ -205,6 +321,9 @@ struct EmulatorView: View {
                 return true
             case 35: // P
                 session.togglePause()
+                return true
+            case 4: // H — toggle the control reminder
+                toggleHints()
                 return true
             case 48: // Tab — hold to fast-forward
                 session.setFastForward(true)

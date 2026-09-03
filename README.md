@@ -93,6 +93,14 @@ Two independent systems, both real:
 Every button and stick direction is rebindable in **Settings › Controls** — click
 a binding, press the key you want.
 
+### On-screen reminder
+
+A compact control card sits in the top-right corner while you play, so you are
+not memorising a table. It reads your live bindings, so rebinding a key updates
+the card too. It dims after twelve seconds to stay out of the way, brightens when
+you hover it, and **H** toggles it entirely (also the keyboard button in the
+control bar). The choice is remembered between sessions.
+
 ## Video options
 
 Smooth (bilinear) scaling, integer scaling that snaps to whole multiples of the
