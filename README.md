@@ -219,3 +219,12 @@ lawful; downloading BIOS images or games you do not own is not.
 
 "PlayStation" is a trademark of Sony Interactive Entertainment. This project is
 not affiliated with or endorsed by Sony.
+
+## License
+
+PS1Sim's own source is [MIT licensed](LICENSE).
+
+The emulator core it runs, PCSX-ReARMed, is GPL and is **not** bundled or
+redistributed here — the app downloads it at runtime, on your instruction, from
+libretro's own build server. That separation is deliberate: linking it into the
+shipped binary would place this whole project under the GPL.
