@@ -31,6 +31,9 @@ jobs:
             echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Test
+        run: swift run PS1SimKitTests
+
       - name: Build app and DMG
         run: scripts/build_app.sh "${{ steps.version.outputs.value }}"
 

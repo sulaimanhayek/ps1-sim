@@ -1,4 +1,5 @@
 import Foundation
+import PS1SimKit
 import AppKit
 
 /// Owns the emulation thread, the core, and audio. Deliberately *not* main-actor
@@ -410,19 +411,3 @@ final class FrameStore: @unchecked Sendable {
 
 /// Reads the disc names out of an .m3u so the tray menu can show "Disc 2" rather
 /// than an index. The core's v0 disc interface reports no labels of its own.
-enum Playlist {
-    static func labels(for url: URL, count: Int) -> [String] {
-        var names: [String] = []
-        if url.pathExtension.lowercased() == "m3u",
-           let text = try? String(contentsOf: url, encoding: .utf8) {
-            names = text.split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-                .map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
-        }
-        // The core is the authority on how many discs it actually mounted.
-        return (0..<count).map { index in
-            names.indices.contains(index) ? names[index] : "Disc \(index + 1)"
-        }
-    }
-}

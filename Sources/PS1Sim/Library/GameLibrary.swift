@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import PS1SimKit
 
 /// The persistent list of imported games. Games are referenced in place — importing
 /// records a path, it does not copy multi-gigabyte disc images.
@@ -71,16 +72,16 @@ final class GameLibrary: ObservableObject {
         var groups: [String: [(disc: Int, url: URL)]] = [:]
 
         for url in urls {
-            let key = groupingTitle(for: url)
+            let key = DiscTitle.grouping(url)
             if order.firstIndex(of: key) == nil { order.append(key) }
-            groups[key, default: []].append((discNumber(in: url) ?? 1, url))
+            groups[key, default: []].append((DiscTitle.discNumber(url) ?? 1, url))
         }
 
         return order.compactMap { title in
             guard let discs = groups[title] else { return nil }
             guard discs.count > 1, Set(discs.map(\.disc)).count == discs.count else {
                 // Left alone, a lone disc keeps the name it had on disk.
-                return Entry(url: discs[0].url, title: prettyTitle(for: discs[0].url))
+                return Entry(url: discs[0].url, title: DiscTitle.pretty(discs[0].url))
             }
             let sorted = discs.sorted { $0.disc < $1.disc }.map(\.url)
             guard let playlist = writePlaylist(named: title, discs: sorted) else {
@@ -90,31 +91,8 @@ final class GameLibrary: ObservableObject {
         }
     }
 
-    /// The title two discs of the same game share. prettyTitle only strips
-    /// bracketed decorations, so "Chrono Cross CD1" keeps its disc marker and
-    /// would never group with CD2; this drops the marker wherever it appears.
-    private func groupingTitle(for url: URL) -> String {
-        var name = prettyTitle(for: url)
-        name = name.replacingOccurrences(of: Self.discMarker, with: " ",
-                                         options: [.regularExpression, .caseInsensitive])
-        name = name.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return name.trimmingCharacters(in: CharacterSet(charactersIn: " -_")).isEmpty
-            ? prettyTitle(for: url)
-            : name.trimmingCharacters(in: CharacterSet(charactersIn: " -_"))
-    }
 
-    private static let discMarker = #"[-_ ]*(?:dis[ck]|cd)\s*[-_]?\s*\d{1,2}"#
 
-    /// The disc number in a filename: "(Disc 2)", "[Disk 2]", "CD2".
-    private func discNumber(in url: URL) -> Int? {
-        let name = url.deletingPathExtension().lastPathComponent
-        let pattern = Self.discMarker
-        guard let match = name.range(of: pattern, options: [.regularExpression, .caseInsensitive]),
-              let digits = name[match].range(of: #"\d{1,2}"#, options: .regularExpression) else {
-            return nil
-        }
-        return Int(name[digits])
-    }
 
     private func writePlaylist(named title: String, discs: [URL]) -> URL? {
         let safe = title.replacingOccurrences(of: "/", with: "-")
@@ -285,15 +263,4 @@ final class GameLibrary: ObservableObject {
         }
     }
 
-    private func prettyTitle(for url: URL) -> String {
-        var name = url.deletingPathExtension().lastPathComponent
-        // Strip the usual scene/redump decorations: "(USA)", "[SLUS-01005]", "Disc 1".
-        name = name.replacingOccurrences(of: #"[\(\[][^\)\]]*[\)\]]"#, with: " ",
-                                         options: .regularExpression)
-        name = name.replacingOccurrences(of: "_", with: " ")
-        name = name.replacingOccurrences(of: ".", with: " ")
-        name = name.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        name = name.trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? url.lastPathComponent : name
-    }
 }

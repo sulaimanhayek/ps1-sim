@@ -171,6 +171,21 @@ To ship a core inside the app instead of downloading it, drop the `.dylib` in
 `packaging/cores/` before building — it is bundled and adopted on first run.
 Check the core's licence before redistributing it.
 
+## Tests
+
+```bash
+swift run PS1SimKitTests
+```
+
+The suite covers `PS1SimKit`: disc-title parsing, multi-disc grouping, the
+memory card format, and playlist reading. It needs no core, no BIOS and no
+disc image — cards are built byte by byte in memory.
+
+It is a plain executable rather than XCTest, deliberately. The command line
+tools ship no XCTest, so an XCTest suite would only run for people with a full
+Xcode install, and tests that cannot be run while writing code do not get run.
+A non-zero exit fails CI, which runs it on every push and before every release.
+
 ## Architecture
 
 | File | Role |
@@ -182,7 +197,11 @@ Check the core's licence before redistributing it.
 | `Core/Input.swift` | Keyboard and controller → DualShock mapping |
 | `Core/Gamepad.swift` | GameController.framework bridge, feeding the same `InputState` |
 | `Core/ChdConverter.swift` | Drives `chdman` to convert disc images to CHD |
-| `Library/MemoryCard.swift` | Reads the PS1 card directory: blocks used and saves present |
+| `Library/MemoryCard.swift` | Finds card files on disk and backs them up |
+| `PS1SimKit/MemoryCardImage.swift` | Parses the PS1 card directory: blocks used and saves present |
+| `PS1SimKit/DiscTitle.swift` | Filename → title, and grouping the discs of one game |
+| `PS1SimKit/Playlist.swift` | Disc labels read from a generated `.m3u` |
+| `PS1SimKitTests/` | The test suite and its small harness |
 | `UI/MetalVideoView.swift` | Runtime-compiled Metal shader drawing the framebuffer |
 | `UI/LibraryView.swift` | Cover grid, import, search |
 | `UI/EmulatorView.swift` | In-game chrome and key handling |
